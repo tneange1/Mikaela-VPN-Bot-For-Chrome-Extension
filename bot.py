@@ -240,7 +240,8 @@ async def _srv(cb: CallbackQuery):
     kb = KB(inline_keyboard=[
         [B(text='🔐 Продлить сертификат', callback_data=f'act:renew:{rid(d)}'),
          B(text='♻️ Перевыпустить', callback_data=f'act:force:{rid(d)}')],
-        [B(text='📤 Записать в GitHub', callback_data=f'act:pub:{rid(d)}')],
+        [B(text='📤 Записать в GitHub', callback_data=f'act:pub:{rid(d)}'),
+         B(text='🚀 BBR (скорость)', callback_data=f'act:bbr:{rid(d)}')],
         [B(text='▶️ Вернуть остановленное на :80', callback_data=f'act:restore:{rid(d)}')],
         [B(text='🗑 Удалить сервер', callback_data=f'act:rm:{rid(d)}')],
         [B(text='⬅️ Назад', callback_data='srvs')]])
@@ -261,12 +262,19 @@ async def _act(cb: CallbackQuery):
                                  [B(text='⬅️ Нет', callback_data=f'srv:{r}')]])
         return await edit(cb, f'Удалить {d}? Контейнер прокси на сервере будет убран, запись пропадёт из GitHub '
                               f'(сертификат останется).', kb)
+    if what == 'bbr':
+        kb = KB(inline_keyboard=[[B(text='🚀 Включить BBR', callback_data=f'act:bbryes:{r}')],
+                                 [B(text='⬅️ Нет', callback_data=f'srv:{r}')]])
+        return await edit(cb, f'Включить на {d} алгоритм TCP BBR? Он ускоряет скачивание на длинных каналах. Это '
+                              f'настройка ядра всего сервера (sysctl), действует на все его соединения и сохраняется '
+                              f'после перезагрузки. Прокси и другие сервисы не перезапускаются.', kb)
     cf = make_confirm(chats, d, 600)
     works = {
         'renew': lambda p: flow.renew(cfg, reg, d, p, False, cf),
         'force': lambda p: flow.renew(cfg, reg, d, p, True, cf),
         'rmyes': lambda p: flow.remove(cfg, reg, d, p),
         'pub': lambda p: flow.publish(cfg, reg, p, d),
+        'bbryes': lambda p: flow.speedup(cfg, reg, d, p),
     }
     if what == 'restore':
         prog = Progress(await cb.message.answer('⏳ …'))

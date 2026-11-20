@@ -10,6 +10,7 @@ import github
 import keys
 import ports
 import proxy
+import tune
 from registry import Registry
 from remote import Remote
 
@@ -150,3 +151,11 @@ async def recover_all(cfg, reg: Registry) -> list[str]:
         except Exception:  # noqa: BLE001
             pass
     return out
+
+
+async def speedup(cfg, reg: Registry, domain: str, say) -> None:
+    rec = reg.get(domain)
+    if not rec:
+        raise FlowError(f'{domain} не найден')
+    async with await Remote.open(**_ssh(cfg, domain, rec)) as r:
+        await say('🚀 ' + await tune.enable_bbr(r, say))

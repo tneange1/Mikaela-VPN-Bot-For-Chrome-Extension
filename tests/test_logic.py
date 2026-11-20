@@ -215,6 +215,36 @@ def test_github_errors_and_add_many():
     assert (e['id'], e['host'], e['port'], e['username']) == ('nl1', 'nl1.x.xyz', 9443, 'u')
 
 
+def test_bbr_enable():
+    import tune
+    class R:
+        def __init__(self, avail, load_ok=True):
+            self.cc, self.avail, self.load_ok, self.files, self.cmds = 'cubic', avail, load_ok, {}, []
+        async def run(self, cmd, timeout=120, stdin=None):
+            self.cmds.append(cmd)
+            if cmd == 'sysctl -n net.ipv4.tcp_congestion_control': return Res(0, self.cc)
+            if cmd == 'sysctl -n net.core.default_qdisc': return Res(0, 'fq_codel')
+            if cmd.startswith('cat /proc/sys/net/ipv4/tcp_available'): return Res(0, self.avail)
+            if cmd == 'modprobe tcp_bbr':
+                if self.load_ok: self.avail += ' bbr'
+                return Res(0 if self.load_ok else 1, '')
+            if cmd.startswith('sysctl -p'): self.cc = 'bbr'; return Res(0, '')
+            return Res(0, '')
+        async def put(self, p, text, mode='600'): self.files[p] = text
+    msgs = []
+    async def say(x): msgs.append(x)
+    r = R('reno cubic')
+    out = run(tune.enable_bbr(r, say))
+    assert r.cc == 'bbr' and 'bbr' in r.files[tune.CONF] and 'включён' in out and any('Теперь' in m for m in msgs)
+    r2 = R('reno cubic', load_ok=False)
+    try:
+        run(tune.enable_bbr(r2, say)); assert False
+    except RuntimeError as e:
+        assert 'нет BBR' in str(e) and not r2.files and r2.cc == 'cubic'      # без BBR в ядре ничего не меняем
+    r3 = R('bbr cubic'); r3.cc = 'bbr'
+    assert 'уже включён' in run(tune.enable_bbr(r3, say)) and not r3.files
+
+
 def test_xray_config_and_certbot_cmd():
     import proxy, certs
     cfg = type('C', (), dict(proxy_user='free', proxy_pass='pw', certbot_base='/opt/certbot', email='a@b.c', http_port=80))()
