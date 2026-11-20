@@ -32,16 +32,22 @@ def test_self_update_and_rollback():
     origin.mkdir()
     sh('git', 'init', '-q', '-b', 'main', cwd=origin)
     a = commit(origin, "print('VERSION A', flush=True)\nimport sys, time\ntime.sleep(2)\nsys.exit(42)\n", 'A')
-    env = dict(os.environ, APP_DIR=str(app), DATA_DIR=str(data), REPO_URL=f'file://{origin}', BRANCH='main', PYTHON='python3')
+    env = dict(os.environ, APP_DIR=str(app), DATA_DIR=str(data), REPO_URL=f'file://{origin}', BRANCH='main', PYTHON='python3', RETRY_SLEEP='1')
     p = subprocess.Popen([str(ROOT / 'entrypoint.sh')], env=env, stdout=open(log, 'w'), stderr=subprocess.STDOUT)
     try:
         assert wait_for(log, 'VERSION A'), log.read_text()
         b = commit(origin, "def broken(:\n", 'B битый')
         assert wait_for(log, 'откат'), log.read_text()                       # B упал -> вернулся на A
         assert (data / 'blocked_commit').read_text().strip() == b
-        assert 'не запустилось' in (data / 'notice.txt').read_text()
+        notice = (data / 'notice.txt').read_text()
+        assert 'не запустилось' in notice and 'SyntaxError' in notice, notice     # в уведомлении есть причина
         assert sh('git', 'rev-parse', 'HEAD', cwd=app) == a
         assert wait_for(log, 'уже не запускался'), log.read_text()           # битый коммит больше не пробуется
+        # разовый сбой (например, сеть при старте) не должен вызывать откат
+        flag = tmp / 'flag'
+        d2 = commit(origin, f"import os, sys, time\nif not os.path.exists({str(flag)!r}):\n    open({str(flag)!r}, 'w').close(); sys.exit(1)\nprint('VERSION D', flush=True)\ntime.sleep(2)\nsys.exit(42)\n", 'D с разовым сбоем')
+        assert wait_for(log, 'VERSION D'), log.read_text()
+        assert 'пробую ещё раз' in log.read_text() and (data / 'blocked_commit').read_text().strip() == b
         c = commit(origin, "print('VERSION C', flush=True)\nimport time\ntime.sleep(300)\n", 'C хороший')
         assert wait_for(log, 'VERSION C'), log.read_text()                   # новый нормальный коммит применился
         assert sh('git', 'rev-parse', 'HEAD', cwd=app) == c

@@ -27,24 +27,33 @@ update() {            # 0 — код обновился
 rollback() {          # $1 — причина
   local bad prev; bad=$(git rev-parse HEAD); prev=$(cat "$DATA_DIR/prev_commit")
   echo "$bad" > "$DATA_DIR/blocked_commit"; git reset -q --hard "$prev"
-  echo "⚠️ Обновление ${bad:0:7} не запустилось ($1). Вернул прежнюю версию ${prev:0:7}, этот коммит больше пробовать не буду." > "$DATA_DIR/notice.txt"
+  { echo "⚠️ Обновление ${bad:0:7} не запустилось ($1). Вернул прежнюю версию ${prev:0:7}, этот коммит больше пробовать не буду."
+    echo; echo "Последние строки лога:"; tail -n 8 "$DATA_DIR/last_run.log" 2>/dev/null | cut -c1-220; } > "$DATA_DIR/notice.txt"
   log "откат: $1"
 }
 
+probation=0; fails=0
 while [ $stopping -eq 0 ]; do
-  UPDATED=0; update && UPDATED=1
+  UPDATED=0; update && { UPDATED=1; probation=1; fails=0; }
   if ! deps; then
     log "pip install не удался"
-    if [ $UPDATED -eq 1 ]; then rollback "зависимости"; continue; fi
+    if [ $UPDATED -eq 1 ]; then rollback "зависимости"; probation=0; continue; fi
   fi
   start=$(date +%s)
-  "$PY" bot.py & child=$!
+  "$PY" bot.py > >(tee "$DATA_DIR/last_run.log") 2>&1 & child=$!
   wait $child; code=$?
   if [ $stopping -eq 1 ]; then wait $child 2>/dev/null; break; fi
   child=
   dur=$(( $(date +%s) - start ))
   [ $code -eq 42 ] && { log "перезапуск для обновления"; continue; }
-  if [ $UPDATED -eq 1 ] && [ $code -ne 0 ] && [ $dur -lt 40 ]; then rollback "упал через ${dur} с, код $code"; continue; fi
+  if [ $probation -eq 1 ]; then          # новая версия на испытательном сроке: откат только если упала дважды подряд
+    if [ $code -ne 0 ] && [ $dur -lt 40 ]; then
+      fails=$((fails + 1))
+      if [ $fails -ge 2 ]; then sleep 1; rollback "упала дважды подряд, последний раз через ${dur} с, код $code"; probation=0; continue; fi
+      log "новая версия упала (код $code), пробую ещё раз"; sleep "${RETRY_SLEEP:-10}"; continue
+    fi
+    probation=0
+  fi
   log "бот завершился с кодом $code, перезапуск через 5 с"; sleep 5
 done
 log "остановлен"

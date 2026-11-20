@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import html
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -10,6 +11,8 @@ from io import BytesIO
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -530,11 +533,18 @@ async def renew_loop() -> None:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    bot = Bot(cfg.tg_token)
+    api = os.environ.get('TG_API_BASE')          # для тестов с поддельным Telegram
+    bot = Bot(cfg.tg_token, session=AiohttpSession(api=TelegramAPIServer.from_base(api)) if api else None)
     bot_ref.append(bot)
     for coro in (announce(), update_loop(), renew_loop()):
         asyncio.create_task(coro)
-    await dp.start_polling(bot)              # возвращается по SIGTERM (docker stop)
+    while True:                              # старт может упасть из-за сети сразу после перезапуска контейнера
+        try:
+            await dp.start_polling(bot)      # возвращается по SIGTERM (docker stop)
+            break
+        except Exception:  # noqa: BLE001
+            logging.exception('не удалось запустить polling, повтор через 10 с')
+            await asyncio.sleep(10)
     for _ in range(55):                      # дать закончить начатую операцию с сервером
         if not flow.busy():
             break
