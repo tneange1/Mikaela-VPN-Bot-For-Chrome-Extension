@@ -40,6 +40,20 @@ async def tls_days_left(domain: str, port: int, timeout: int = 10) -> int:
     return int((ssl.cert_time_to_seconds(cert['notAfter']) - time.time()) // 86400)
 
 
+def entry(cfg, domain: str, rec: dict) -> dict:
+    label = domain.split('.')[0]
+    return {'id': label if label != 'www' else domain, 'name': rec['name'], 'code': rec['code'], 'scheme': 'https',
+            'host': domain, 'port': rec['port'], 'username': cfg.proxy_user, 'password': cfg.proxy_pass}
+
+
+async def publish(cfg, reg: Registry, say, domain: str | None = None) -> None:
+    """Записать сервер (или все) из реестра бота в servers.json на GitHub."""
+    items = [domain] if domain else list(reg.d)
+    if not items or not all(reg.get(d) for d in items):
+        raise FlowError('Нет серверов для записи')
+    await say('📤 GitHub: ' + await github.update_servers(cfg, add_many=[entry(cfg, d, reg.get(d)) for d in items]))
+
+
 def _ssh(cfg, domain, rec):
     return dict(host=rec['ssh_host'], port=rec['ssh_port'], user=rec['ssh_user'], key=rec.get('ssh_key') or cfg.ssh_key,
                 known_hosts=cfg.known_hosts, passphrase=cfg.ssh_pass)
@@ -86,12 +100,11 @@ async def provision(cfg, reg: Registry, domain: str, opts: dict, say, confirm=No
     await say(f'✅ Проверка снаружи: выход через {info}')
     rec['port'] = port
     reg.set(domain, rec)
-    entry = {'id': label if label != 'www' else domain, 'name': rec['name'], 'code': rec['code'], 'scheme': 'https',
-             'host': domain, 'port': port, 'username': cfg.proxy_user, 'password': cfg.proxy_pass}
     try:
-        await say('📤 GitHub: ' + await github.update_servers(cfg, add=entry))
+        await say('📤 GitHub: ' + await github.update_servers(cfg, add=entry(cfg, domain, rec)))
     except Exception as e:  # noqa: BLE001
-        await say(f'⚠️ Сервер работает, но записать в GitHub не вышло: {e}')
+        await say(f'⚠️ Сервер работает, но записать в GitHub не вышло: {e}\n'
+                  f'Исправьте токен и нажмите «📤 Записать в GitHub» в карточке сервера: заново добавлять не нужно.')
 
 
 async def renew(cfg, reg: Registry, domain: str, say, force: bool = False, confirm=None) -> None:

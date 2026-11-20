@@ -188,6 +188,33 @@ def test_github_dump_and_update():
     assert 'REPLACE' not in base64.b64decode(store['put']['content']).decode()
 
 
+def test_github_errors_and_add_many():
+    import github, httpx, base64
+    cfg = type('C', (), dict(gh_repo='o/r', gh_path='p.json', gh_branch='main', gh_token='t', proxy_user='u', proxy_pass='x'))()
+    real = httpx.AsyncClient
+    github.httpx.AsyncClient = lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(401, json={})), **kw)
+    try:
+        run(github.update_servers(cfg, add={'id': 'a', 'host': 'a.x'})); assert False
+    except RuntimeError as e:
+        assert '401' in str(e) and 'токен' in str(e)
+    finally:
+        github.httpx.AsyncClient = real
+    put = {}
+    def handler(req):
+        if req.method == 'GET':
+            return httpx.Response(200, json={'sha': 's', 'content': base64.b64encode(b'{"version":1,"servers":[{"id":"old","host":"old.x"}]}').decode()})
+        put.update(json.loads(req.content)); return httpx.Response(200, json={'commit': {'html_url': 'u'}})
+    github.httpx.AsyncClient = lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    try:
+        run(github.update_servers(cfg, add_many=[{'id': 'a', 'host': 'a.x'}, {'id': 'b', 'host': 'b.x'}]))
+    finally:
+        github.httpx.AsyncClient = real
+    assert [x['id'] for x in json.loads(base64.b64decode(put['content']))['servers']] == ['old', 'a', 'b']
+    import flow
+    e = flow.entry(cfg, 'nl1.x.xyz', {'name': 'NL', 'code': 'NL', 'port': 9443})
+    assert (e['id'], e['host'], e['port'], e['username']) == ('nl1', 'nl1.x.xyz', 9443, 'u')
+
+
 def test_xray_config_and_certbot_cmd():
     import proxy, certs
     cfg = type('C', (), dict(proxy_user='free', proxy_pass='pw', certbot_base='/opt/certbot', email='a@b.c', http_port=80))()

@@ -148,7 +148,9 @@ async def _b_add(m: Message, state: FSMContext):
 
 def servers_kb() -> KB:
     rows = [[B(text=f'{r["code"]} · {d}:{r["port"]}', callback_data=f'srv:{rid(d)}')] for d, r in reg.d.items()]
-    return KB(inline_keyboard=rows or [[B(text='Серверов нет', callback_data='noop')]])
+    rows.append([B(text='📤 Записать все в GitHub', callback_data='puball')] if reg.d else
+                [B(text='Серверов нет', callback_data='noop')])
+    return KB(inline_keyboard=rows)
 
 
 @dp.message(F.text == BTN_LIST)
@@ -235,6 +237,7 @@ async def _srv(cb: CallbackQuery):
     kb = KB(inline_keyboard=[
         [B(text='🔐 Продлить сертификат', callback_data=f'act:renew:{rid(d)}'),
          B(text='♻️ Перевыпустить', callback_data=f'act:force:{rid(d)}')],
+        [B(text='📤 Записать в GitHub', callback_data=f'act:pub:{rid(d)}')],
         [B(text='▶️ Вернуть остановленное на :80', callback_data=f'act:restore:{rid(d)}')],
         [B(text='🗑 Удалить сервер', callback_data=f'act:rm:{rid(d)}')],
         [B(text='⬅️ Назад', callback_data='srvs')]])
@@ -260,6 +263,7 @@ async def _act(cb: CallbackQuery):
         'renew': lambda p: flow.renew(cfg, reg, d, p, False, cf),
         'force': lambda p: flow.renew(cfg, reg, d, p, True, cf),
         'rmyes': lambda p: flow.remove(cfg, reg, d, p),
+        'pub': lambda p: flow.publish(cfg, reg, p, d),
     }
     if what == 'restore':
         prog = Progress(await cb.message.answer('⏳ …'))
@@ -268,6 +272,17 @@ async def _act(cb: CallbackQuery):
         except Exception as e:  # noqa: BLE001
             return await prog(f'❌ {e}')
     await guarded(cb.message, d, works[what])
+
+
+@dp.callback_query(F.data == 'puball')
+async def _puball(cb: CallbackQuery):
+    await cb.answer()
+    prog = Progress(await cb.message.answer('⏳ GitHub …'))
+    try:
+        await flow.publish(cfg, reg, prog)
+        await prog('🎉 Готово')
+    except Exception as e:  # noqa: BLE001
+        await prog(f'❌ {e}')
 
 
 @dp.callback_query(F.data.startswith('pause:'))

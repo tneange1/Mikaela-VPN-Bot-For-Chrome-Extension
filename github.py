@@ -10,8 +10,22 @@ def _dump(data: dict) -> str:
     return f'{{\n  "version": {data.get("version", 1)},\n  "servers": [\n{rows}\n  ]\n}}\n'
 
 
-async def update_servers(cfg, add: dict | None = None, remove_host: str | None = None) -> str:
-    """Добавляет/заменяет/удаляет запись в chrome/servers.json репозитория."""
+HINTS = {401: 'токен GitHub неверный, обрезан или истёк — выпустите новый и обновите GITHUB_TOKEN в .env',
+         403: 'у токена нет права Contents: Read and write на этот репозиторий',
+         404: 'токен не видит репозиторий или файл chrome/servers.json — проверьте доступ токена к репозиторию'}
+
+
+async def update_servers(cfg, add: dict | None = None, remove_host: str | None = None,
+                         add_many: list[dict] | None = None) -> str:
+    """Добавляет/заменяет/удаляет записи в chrome/servers.json репозитория."""
+    try:
+        return await _update(cfg, add, remove_host, add_many)
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        raise RuntimeError(f'GitHub {code}: ' + HINTS.get(code, e.response.text[:200])) from None
+
+
+async def _update(cfg, add, remove_host, add_many) -> str:
     url = f'https://api.github.com/repos/{cfg.gh_repo}/contents/{cfg.gh_path}'
     h = {'Authorization': f'Bearer {cfg.gh_token}', 'Accept': 'application/vnd.github+json'}
     async with httpx.AsyncClient(headers=h, timeout=30) as c:
@@ -19,13 +33,15 @@ async def update_servers(cfg, add: dict | None = None, remove_host: str | None =
         r.raise_for_status()
         j = r.json()
         data = json.loads(base64.b64decode(j['content']))
-        hosts = {x for x in (remove_host, add and add['host']) if x}
+        adds = ([add] if add else []) + list(add_many or [])
+        hosts = {x for x in [remove_host] + [a['host'] for a in adds] if x}
+        ids = {a['id'] for a in adds}
         servers = [s for s in data.get('servers', [])
-                   if 'REPLACE' not in json.dumps(s) and s.get('host') not in hosts and not (add and s.get('id') == add['id'])]
-        if add:
-            servers.append(add)
+                   if 'REPLACE' not in json.dumps(s) and s.get('host') not in hosts and s.get('id') not in ids]
+        servers += adds
         data['servers'] = servers
-        body = {'message': f'chrome: servers.json — {"добавлен " + add["host"] if add else "удалён " + str(remove_host)}',
+        what = ('добавлено: ' + ', '.join(a['host'] for a in adds)) if adds else f'удалён {remove_host}'
+        body = {'message': f'chrome: servers.json — {what}',
                 'content': base64.b64encode(_dump(data).encode()).decode(), 'sha': j['sha'], 'branch': cfg.gh_branch}
         p = await c.put(url, json=body)
         p.raise_for_status()
