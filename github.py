@@ -12,12 +12,12 @@ def _dump(data: dict) -> str:
 
 HINTS = {401: 'токен GitHub неверный, обрезан или истёк — выпустите новый и обновите GITHUB_TOKEN в .env',
          403: 'у токена нет права Contents: Read and write на этот репозиторий',
-         404: 'токен не видит репозиторий или файл chrome/servers.json — проверьте доступ токена к репозиторию'}
+         404: 'токен не видит репозиторий или файл servers.json — проверьте доступ токена к репозиторию'}
 
 
 async def update_servers(cfg, add: dict | None = None, remove_host: str | None = None,
                          add_many: list[dict] | None = None) -> str:
-    """Добавляет/заменяет/удаляет записи в chrome/servers.json репозитория."""
+    """Добавляет/заменяет/удаляет записи в servers.json репозитория."""
     try:
         return await _update(cfg, add, remove_host, add_many)
     except httpx.HTTPStatusError as e:
