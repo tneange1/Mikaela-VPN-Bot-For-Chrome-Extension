@@ -31,7 +31,7 @@ def _certbot_cmd(cfg, domain: str, docker: bool, force: bool) -> str:
     return f"certbot {args} --config-dir {b}/certs --work-dir {b}/var-lib-letsencrypt --logs-dir {b}/logs"
 
 
-async def ensure(r, cfg, domain: str, say, force: bool = False) -> str:
+async def ensure(r, cfg, domain: str, say, force: bool = False, confirm=None) -> str:
     """Выпускает/продлевает сертификат. Порт 80 освобождается и всегда возвращается."""
     left = await days_left(r, cfg, domain)
     if left is not None and left > cfg.renew_days and not force:
@@ -40,7 +40,7 @@ async def ensure(r, cfg, domain: str, say, force: bool = False) -> str:
     if not docker and not (await r.run('command -v certbot')).ok:
         raise CertError('На сервере нет ни docker, ни certbot')
     await r.run(f"mkdir -p {cfg.certbot_base}/certs {cfg.certbot_base}/var-lib-letsencrypt {cfg.certbot_base}/logs")
-    paused = Paused(r, cfg.http_port)
+    paused = Paused(r, cfg.http_port, confirm)
     try:
         async with paused:
             if paused.held:

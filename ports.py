@@ -99,8 +99,8 @@ async def _start_all(r, held: list[Held]) -> list[str]:
 class Paused:
     """async with Paused(r, 80): ... — порт свободен внутри, всё возвращается на выходе (даже при ошибке)."""
 
-    def __init__(self, r, port: int):
-        self.r, self.port = r, port
+    def __init__(self, r, port: int, confirm=None):
+        self.r, self.port, self.confirm = r, port, confirm
         self.held: list[Held] = []
         self.touched: list[Held] = []
         self.problems: list[str] = []
@@ -108,6 +108,9 @@ class Paused:
     async def __aenter__(self) -> 'Paused':
         try:
             self.held = await discover(self.r, self.port)
+            if self.held and self.confirm and not await self.confirm(self.held):
+                self.held = []
+                raise PauseError('Отменено: для сертификата нужен свободный порт 80, ничего не останавливал')
             if self.held:
                 await self.r.put(STATE, json.dumps({'port': self.port, 'held': [asdict(h) for h in self.held]}))
                 for h in self.held:

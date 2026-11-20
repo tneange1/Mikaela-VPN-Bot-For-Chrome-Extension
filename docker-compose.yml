@@ -1,0 +1,25 @@
+# Отдельный проект: свои контейнер, сеть и том. Порты не публикуются, с Remnawave ничего не пересекается.
+name: mikaela-bot
+services:
+  bot:
+    build: .
+    image: mikaela-bot:local
+    container_name: mikaela-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Yekaterinburg
+    volumes:
+      - ./data:/data          # ключи, реестр серверов, настройки
+      - app:/app              # код бота (обновляется из git)
+    stop_grace_period: 60s    # дать закончить начатую операцию
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+volumes:
+  app:

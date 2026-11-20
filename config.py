@@ -42,6 +42,7 @@ class Cfg:
     port_hi: int
     http_port: int
     renew_days: int
+    auto_pause: bool
     data_dir: Path
 
     @property
@@ -77,5 +78,6 @@ def load(env_file: str = '.env') -> Cfg:
         port_lo=int(lo), port_hi=int(hi),
         http_port=int(g('HTTP_PORT', '80')),
         renew_days=int(g('RENEW_DAYS', '30')),
+        auto_pause=g('AUTO_PAUSE', '0') == '1',
         data_dir=data,
     )

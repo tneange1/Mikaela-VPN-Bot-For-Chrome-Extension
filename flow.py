@@ -21,6 +21,10 @@ class FlowError(Exception):
     pass
 
 
+def busy() -> bool:
+    return any(l.locked() for l in _locks.values())
+
+
 def lock(domain: str) -> asyncio.Lock:
     return _locks.setdefault(domain, asyncio.Lock())
 
@@ -41,7 +45,7 @@ def _ssh(cfg, domain, rec):
                 known_hosts=cfg.known_hosts, passphrase=cfg.ssh_pass)
 
 
-async def provision(cfg, reg: Registry, domain: str, opts: dict, say) -> None:
+async def provision(cfg, reg: Registry, domain: str, opts: dict, say, confirm=None) -> None:
     old = reg.get(domain) or {}
     rec = {
         'ssh_host': opts.get('ssh_host') or old.get('ssh_host') or domain,
@@ -72,7 +76,7 @@ async def provision(cfg, reg: Registry, domain: str, opts: dict, say) -> None:
             await say('🔑 Установил на сервер ключ бота. Пароль нигде не сохранён, дальше вход только по ключу')
         if not (await r.run('command -v docker')).ok:
             raise FlowError('На сервере не установлен docker')
-        await say('🔐 ' + await certs.ensure(r, cfg, domain, say))
+        await say('🔐 ' + await certs.ensure(r, cfg, domain, say, confirm=confirm))
         port = await proxy.deploy(r, cfg, domain, say)
         await say(f'✅ Прокси запущен на порту {port}')
     ok, info = await proxy.external_check(cfg, domain, port)
@@ -90,12 +94,12 @@ async def provision(cfg, reg: Registry, domain: str, opts: dict, say) -> None:
         await say(f'⚠️ Сервер работает, но записать в GitHub не вышло: {e}')
 
 
-async def renew(cfg, reg: Registry, domain: str, say, force: bool = False) -> None:
+async def renew(cfg, reg: Registry, domain: str, say, force: bool = False, confirm=None) -> None:
     rec = reg.get(domain)
     if not rec:
         raise FlowError(f'{domain} не найден (/list)')
     async with await Remote.open(**_ssh(cfg, domain, rec)) as r:
-        await say('🔐 ' + await certs.ensure(r, cfg, domain, say, force=force))
+        await say('🔐 ' + await certs.ensure(r, cfg, domain, say, force=force, confirm=confirm))
         await proxy.restart(r)
     await say(f'✅ {domain}: прокси перезапущен с новым сертификатом')
 
@@ -120,3 +124,16 @@ async def remove(cfg, reg: Registry, domain: str, say) -> None:
         await say('📤 GitHub: ' + await github.update_servers(cfg, remove_host=domain))
     except Exception as e:  # noqa: BLE001
         await say(f'⚠️ Из GitHub не удалилось: {e}')
+
+
+async def recover_all(cfg, reg: Registry) -> list[str]:
+    """После падения/перезапуска бота: вернуть то, что осталось остановленным на :80."""
+    out = []
+    for d in list(reg.d):
+        try:
+            res = await restore(cfg, reg, d)
+            if res and res != ['ничего возвращать не нужно']:
+                out.append(f'{d}: {"; ".join(res)}')
+        except Exception:  # noqa: BLE001
+            pass
+    return out
