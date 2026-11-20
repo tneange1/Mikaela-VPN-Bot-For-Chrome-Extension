@@ -62,7 +62,7 @@ def load(env_file: str = '.env') -> Cfg:
     return Cfg(
         tg_token=_req('TG_TOKEN'),
         admins=frozenset(int(x) for x in _req('ADMIN_IDS').replace(' ', '').split(',') if x),
-        ssh_key=_req('SSH_KEY'),
+        ssh_key=g('SSH_KEY') or str(data / 'ssh' / 'id_ed25519'),
         ssh_pass=g('SSH_KEY_PASSPHRASE') or None,
         ssh_user=g('SSH_USER', 'root'),
         gh_token=_req('GITHUB_TOKEN'),

@@ -239,6 +239,49 @@ def test_ssh_tofu_run_put():
     run(go())
 
 
+def test_password_login_installs_key_and_keys_module():
+    import asyncssh, remote, keys
+    async def go():
+        tmp = Path(tempfile.mkdtemp())
+        hk = asyncssh.generate_private_key('ssh-ed25519'); hk.write_private_key(tmp / 'h')
+        class S(asyncssh.SSHServer):
+            def begin_auth(self, u): return True
+            def password_auth_supported(self): return True
+            def validate_password(self, u, p): return p == 'secret'
+        async def handle(proc):
+            env = dict(os.environ, HOME=str(tmp / 'home'))
+            (tmp / 'home').mkdir(exist_ok=True)
+            p = await asyncio.create_subprocess_shell(proc.command, stdout=asyncio.subprocess.PIPE,
+                                                      stderr=asyncio.subprocess.PIPE, env=env)
+            o, e = await p.communicate()
+            proc.stdout.write(o.decode()); proc.stderr.write(e.decode()); proc.exit(p.returncode)
+        srv = await asyncssh.create_server(S, '127.0.0.1', 0, server_host_keys=[str(tmp / 'h')], process_factory=handle)
+        port = srv.sockets[0].getsockname()[1]
+        kh = tmp / 'kh'
+        try:
+            await remote.Remote.open('127.0.0.1', port, 'root', 'x', kh, trust_new=True, password='bad'); assert False
+        except asyncssh.PermissionDenied:
+            pass
+        cfg = type('C', (), dict(ssh_key=str(tmp / 'k' / 'id')))()
+        keys.ensure_bot_key(cfg)
+        assert oct((tmp / 'k' / 'id').stat().st_mode & 0o777) == '0o600'
+        pub = keys.pub_of(cfg.ssh_key)
+        async with await remote.Remote.open('127.0.0.1', port, 'root', 'x', kh, trust_new=True, password='secret') as r:
+            await r.install_pubkey(pub); await r.install_pubkey(pub)     # дважды — без дублей
+        ak = (tmp / 'home/.ssh/authorized_keys').read_text()
+        assert ak.count(pub) == 1
+        srv.close()
+        # импорт ключа
+        k = asyncssh.generate_private_key('ssh-ed25519')
+        assert keys.import_key(k.export_private_key().decode())
+        for bad in (pub, 'мусор'):
+            try:
+                keys.import_key(bad); assert False
+            except ValueError:
+                pass
+    run(go())
+
+
 if __name__ == '__main__':
     for n, f in list(globals().items()):
         if n.startswith('test_'):

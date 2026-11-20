@@ -33,10 +33,14 @@ class Remote:
 
     @classmethod
     async def open(cls, host: str, port: int, user: str, key: str, known_hosts: Path,
-                   passphrase: str | None = None, trust_new: bool = False) -> 'Remote':
+                   passphrase: str | None = None, trust_new: bool = False,
+                   password: str | None = None) -> 'Remote':
         known_hosts.parent.mkdir(parents=True, exist_ok=True)
-        kw = dict(host=host, port=port, username=user, client_keys=[key],
-                  passphrase=passphrase, connect_timeout=20)
+        kw = dict(host=host, port=port, username=user, connect_timeout=20)
+        if password:   # первый вход по паролю; дальше бот ставит свой ключ и пароль больше не нужен
+            kw.update(password=password, client_keys=None, agent_path=None)
+        else:
+            kw.update(client_keys=[key], passphrase=passphrase)
         if _pinned(known_hosts, host, port):
             return cls(await asyncssh.connect(known_hosts=str(known_hosts), **kw))
         if not trust_new:
@@ -63,6 +67,13 @@ class Remote:
         return Res(p.exit_status if p.exit_status is not None else -1,
                    (p.stdout or '').strip() if isinstance(p.stdout, str) else '',
                    (p.stderr or '').strip() if isinstance(p.stderr, str) else '')
+
+    async def install_pubkey(self, pub: str) -> None:
+        r = await self.run(
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && "
+            f"(grep -qxF '{pub}' ~/.ssh/authorized_keys || echo '{pub}' >> ~/.ssh/authorized_keys)")
+        if not r.ok:
+            raise RuntimeError('Не удалось установить SSH-ключ: ' + r.err)
 
     async def put(self, path: str, text: str, mode: str = '600') -> None:
         d = path.rsplit('/', 1)[0]

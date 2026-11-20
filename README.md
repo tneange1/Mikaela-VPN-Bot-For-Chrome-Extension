@@ -15,30 +15,45 @@ Telegram-бот, который по одной команде превраща�
 5. Проверяет «снаружи» (с машины бота): валидный сертификат, логин, выход в интернет.
 6. Только после успешной проверки дописывает сервер в `chrome/servers.json` в GitHub — расширение подхватит сам.
 
-Остальные команды: `/renew домен|all [force]`, `/restore домен`, `/remove домен`, `/list`, `/status`.
+Остальные команды: `/renew домен|all [force]`, `/restore домен`, `/remove домен`, `/list`, `/status`, `/key`, `/setkey`, `/cancel`.
 Раз в 12 часов бот сам проверяет сертификаты и продлевает за 30 дней до конца (с уведомлением).
 
-## Установка (на любом сервере, лучше не на ноде VPN)
+## Установка бота
 ```bash
-# 1. ключ только для бота
-ssh-keygen -t ed25519 -f ~/.ssh/mikaela_bot -N ""
-# публичный ключ ~/.ssh/mikaela_bot.pub добавьте в ~/.ssh/authorized_keys на каждый сервер
-
-# 2. бот
+apt install -y python3-venv git
+git clone https://github.com/tneange1/Mikaela-VPN-Bot-For-Chrome-Extension /opt/mikaela-bot
+cd /opt/mikaela-bot
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-cp .env.example .env && chmod 600 .env     # заполнить
-./venv/bin/python bot.py
-```
-Нужно: токен от @BotFather, ваш Telegram ID (`@userinfobot`), fine-grained токен GitHub только на репозиторий
-Mikaela-VPN-Client с правом *Contents: Read and write*, e-mail для Let's Encrypt.
-Автозапуск: `mikaela-bot.service` (поправьте пути и пользователя).
+cp .env.example .env && chmod 600 .env && nano .env
+./venv/bin/python bot.py          # проверка, потом Ctrl+C
 
-На серверах нужны docker и домен, указывающий на сервер (A-запись без проксирования CDN). Порт 80 должен быть доступен
-из интернета, а выбранный порт прокси — открыт и в файрволе хостера.
+cp mikaela-bot.service /etc/systemd/system/
+sed -i 's/^User=.*/User=root/' /etc/systemd/system/mikaela-bot.service
+systemctl daemon-reload && systemctl enable --now mikaela-bot
+```
+В `.env` нужны: токен от @BotFather, ваш Telegram ID (@userinfobot), fine-grained токен GitHub только на
+Mikaela-VPN-Client (Contents: Read and write), пароль прокси, e-mail для Let's Encrypt. SSH-ключ бот создаёт сам.
+
+## Добавление сервера
+Напишите боту `/add` — он спросит по шагам:
+1. домен (`fi.mikaelavpn.xyz`);
+2. IP для SSH (можно `1.2.3.4:2222`; «-» если домен уже указывает на сервер);
+3. как заходить: **пароль root** (бот войдёт один раз, поставит на сервер свой ключ, пароль нигде не хранится),
+   **загрузить свой SSH-ключ** (текстом или файлом) или **ключ бота** (если его публичная часть из `/key` уже на сервере);
+4. название и код страны (`Финляндия FI`).
+
+Сообщения с паролем и ключом бот сразу удаляет из чата. Публичный ключ загружать не нужно, он вычисляется из приватного.
+`/key` показывает публичный ключ бота, `/setkey` заменяет ключ бота на ваш.
+Быстрая форма без вопросов: `/add fi.example.com ssh=1.2.3.4:22 code=FI name=Финляндия`.
+
+На сервере нужны docker и домен с A-записью на сервер (без проксирования CDN). Порт 80 должен быть открыт из интернета,
+выбранный порт прокси (бот его назовёт) открыт в файрволе хостера. Для входа по паролю на сервере должен быть разрешён
+root-вход (`PermitRootLogin yes`).
 
 ## Безопасность
 - Бот отвечает только `ADMIN_IDS`.
-- У бота root-доступ ко всем серверам: храните `.env` и ключ с правами 600, не запускайте бота в общедоступном месте.
+- У бота root-доступ ко всем серверам: ключ лежит в `data/ssh/` (права 600), `.env` тоже 600. Не запускайте бота в общедоступном месте.
+- Чат с ботом — приватный: пароль и ключ вы присылаете сюда, бот удаляет сообщение, но в Telegram оно уже проходило.
 - `PROXY_USER/PROXY_PASS` публикуются в `servers.json` и внутри расширения — считайте их публичными.
   Прокси блокирует локальные адреса, торренты и SMTP (25/465/587).
 - Лимиты Let's Encrypt: 5 неудачных выпусков в час на домен — не спамьте `/add` при ошибке DNS.

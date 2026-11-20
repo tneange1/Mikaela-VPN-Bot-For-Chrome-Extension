@@ -4,8 +4,10 @@ import re
 import ssl
 import time
 
+import asyncssh
 import certs
 import github
+import keys
 import ports
 import proxy
 from registry import Registry
@@ -35,7 +37,7 @@ async def tls_days_left(domain: str, port: int, timeout: int = 10) -> int:
 
 
 def _ssh(cfg, domain, rec):
-    return dict(host=rec['ssh_host'], port=rec['ssh_port'], user=rec['ssh_user'], key=cfg.ssh_key,
+    return dict(host=rec['ssh_host'], port=rec['ssh_port'], user=rec['ssh_user'], key=rec.get('ssh_key') or cfg.ssh_key,
                 known_hosts=cfg.known_hosts, passphrase=cfg.ssh_pass)
 
 
@@ -49,10 +51,25 @@ async def provision(cfg, reg: Registry, domain: str, opts: dict, say) -> None:
     label = domain.split('.')[0]
     rec['code'] = (opts.get('code') or old.get('code') or re.sub('[^A-Za-z]', '', label)[:2] or 'XX').upper()
     rec['name'] = opts.get('name') or old.get('name') or rec['code']
-    async with await Remote.open(trust_new=True, **_ssh(cfg, domain, rec)) as r:
+    pw = opts.get('password')
+    if pw:
+        rec['ssh_key'] = None
+    elif opts.get('key_path'):
+        rec['ssh_key'] = opts['key_path']
+    else:
+        rec['ssh_key'] = old.get('ssh_key')
+    try:
+        conn = await Remote.open(trust_new=True, password=pw, **_ssh(cfg, domain, rec))
+    except (asyncssh.Error, OSError, PermissionError) as e:
+        raise FlowError(f'SSH не подключился: {e}\nПроверьте IP/порт и пароль или ключ. Для входа по паролю на сервере '
+                        f'должно быть разрешено PermitRootLogin yes.')
+    async with conn as r:
         if r.fingerprint:
             await say(f'🔑 Новый сервер, запомнил отпечаток ключа {r.fingerprint}')
         await say('✅ SSH подключён')
+        if pw:
+            await r.install_pubkey(keys.pub_of(cfg.ssh_key))
+            await say('🔑 Установил на сервер ключ бота. Пароль нигде не сохранён, дальше вход только по ключу')
         if not (await r.run('command -v docker')).ok:
             raise FlowError('На сервере не установлен docker')
         await say('🔐 ' + await certs.ensure(r, cfg, domain, say))
