@@ -1,0 +1,12 @@
+[Unit]
+Description=Mikaela Chrome proxy bot
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/mikaela-bot
+ExecStart=/opt/mikaela-bot/venv/bin/python bot.py
+Restart=always
+User=mikaela-bot
+
+[Install]
+WantedBy=multi-user.target
